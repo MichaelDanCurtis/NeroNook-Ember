@@ -145,6 +145,12 @@ import NookPluginSDK
     func handle(_ event: PluginViewEvent) throws {
         guard event.panelID == "monitor" else { throw ModuleProblem("Unknown Fuego view.") }
         try definition.validate(event)
+        if event.name == PluginAvatarPlayback.event {
+            guard case .string(let raw)=event.values["id"],let id=UUID(uuidString:raw),case .string(let kind)=event.values["kind"] else {throw ModuleProblem("Invalid avatar reaction.")}
+            if kind == "stop" {speech.stopReaction(id)}
+            else if let reaction=PluginAvatarReaction(rawValue:kind), !(talk.active || conversationTurn != nil && !conversationHandled) {try speech.react(reaction,id:id)}
+            publish();return
+        }
         switch event.name {
         // The active handoff view has its own revision. Do not revalidate its
         // toolbar events against the older compute-only view's revision.
@@ -299,6 +305,8 @@ import NookPluginSDK
     }
     var definition: PluginCustomView {
         var view = monitor.customView
+        view.avatarReactions=true;view.avatarPlayback=speech.avatarPlayback
+        view.state["reactionSpeaking"] = .boolean(speech.avatarPlayback != nil)
         let choices = speech.providers.map { ["key": $0.address.key, "name": $0.action?.title ?? $0.address.plugin] }
         view.state["speechProviders"] = .string(String(data: (try? JSONEncoder().encode(choices)) ?? Data(), encoding: .utf8) ?? "[]")
         view.state["speechProvider"] = .string(speech.selectedKey)

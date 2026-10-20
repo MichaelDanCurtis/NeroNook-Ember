@@ -167,7 +167,7 @@ function updateEmber(state) {
  $('emberTalkAvatar').hidden=false;
  $('emberInputLevel').value=Math.max(0,Math.min(1,Number(state.voicePhase==='speaking'?state.voiceOutputLevel:state.voiceLevel)||0));
  $('emberInputLevel').setAttribute('aria-label',state.voicePhase==='speaking'?'Speech playback level':'Microphone level');
- window.NookAvatar?.setBusy?.(!!state.voiceActive||!!state.speechActive);document.querySelectorAll('.nook-presence').forEach(el=>{window.NookAvatar?.speech(el,state.voiceOutputLevel||0,state.voiceActive&&state.voicePhase==='speaking');let pose={};try{pose=JSON.parse(state.voiceExpression||'{}')}catch{}window.NookAvatar?.expression(el,pose);});
+ window.NookAvatar?.setBusy?.(!!state.voiceActive||(!!state.speechActive&&!state.reactionSpeaking));document.querySelectorAll('.nook-presence').forEach(el=>{window.NookAvatar?.speech(el,state.voiceOutputLevel||0,state.voiceActive&&state.voicePhase==='speaking');let pose={};try{pose=JSON.parse(state.voiceExpression||'{}')}catch{}window.NookAvatar?.expression(el,pose);});
  $('emberLiveWords').textContent=state.voicePartial||(state.voicePhase==='preparing'?'Preparing local speech…':state.voicePhase==='thinking'?'Ember is thinking…':state.voicePhase==='speaking'?'Ember is speaking…':'Listening…');
  const voiceStatus=state.voiceStatus||'';
  $('emberVoiceStatus').textContent=voice ? (voiceStatus||'Starting local speech…') : (/^(Press Talk|Allow a shared|Choose an allowed)/.test(voiceStatus)?'':voiceStatus);

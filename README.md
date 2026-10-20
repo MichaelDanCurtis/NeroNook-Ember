@@ -1,3 +1,5 @@
+**October 20 · local 0.5.10:** avatar tickle and playful Zoom use the current local speech selection through the shared SDK, with measured mouths, exact cancellation and a silent Wave/Twirl menu. Existing voice settings and action scopes are retained. [Installed checks and limits](../../../NeroNook/reports/avatar-playful-reactions-2026-10-20/README.md). Local only.
+
 **October 19 · local 0.5.6 installed:** shared native/web avatar articulation adds larger pointer-following turns, tilt, lean and a floating offset. Eyes and speech remain independent. [Qualification and limits](../../../NeroNook/reports/avatar-articulation-2026-10-19/README.md). Local only.
 
 **October 19 · local candidate 0.5.5:** shared avatar eyes/head follow the same-display pointer independently of speech. Built and tested; installation pending the owner's open-chat decision. [Evidence](../../../NeroNook/reports/avatar-pointer-2026-10-19/README.md).
