@@ -1,0 +1,11 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const source=fs.readFileSync(new URL('../Sources/ModuleApp/FuegoSession.swift',import.meta.url),'utf8');
+const script=source.match(/let script = """([\s\S]*?)"""/)[1];const origin='https://fuego.example.org';let captured=[],cancelled=false,large=false;
+const fetch=async(url,options)=>{captured.push({url,options});let sent=false;return{status:200,headers:{get:()=> 'application/json'},body:{getReader:()=>({read:async()=>{if(sent)return{done:true};sent=true;return{done:false,value:large?new Uint8Array(524289):new TextEncoder().encode('{"status":"ok"}')};},cancel:async()=>{cancelled=true;}})}};};
+const context={location:{origin},AbortController,setTimeout,clearTimeout,TextDecoder,Uint8Array,fetch};
+const call=vm.runInNewContext('(async function(path,method,body,origin){'+script+'})',context);
+const response=await call('/api/test','POST','{}',origin);assert.equal(response.status,200);assert.equal(response.body,'{"status":"ok"}');
+assert.equal(captured[0].options.referrer,origin+'/');assert.equal(captured[0].options.referrerPolicy,'same-origin');assert.equal(captured[0].options.credentials,'same-origin');assert.equal(captured[0].options.redirect,'error');
+const wrong=await call('/api/test','POST','{}','https://wrong.example.org');assert.equal(wrong.status,0);assert.equal(captured.length,1);
+large=true;const overflow=await call('/api/test','GET','',origin);assert.equal(overflow.status,0);assert.equal(cancelled,true);
+console.log('PASS: isolated request origin, authenticated same-origin referrer, no redirects, JSON response and pre-bridge byte cap.');

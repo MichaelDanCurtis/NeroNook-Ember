@@ -1,0 +1,30 @@
+{
+  "id": "cloud.fuego.nook-agent",
+  "name": "Fuego Agent",
+  "version": "0.5.7",
+  "apiVersion": 1,
+  "summary": "Reviewed Fuego task handoff with durable run tracking, progress, cancellation and results.",
+  "icon": {
+    "symbol": "flame.fill",
+    "color": "FF6B35"
+  },
+  "capabilities": [
+    "Reads fresh, signed-peer local Fuego Compute connection and admitted-job metadata",
+    "Publishes read-only compute status to explicitly permitted Nero Nook plugins",
+    "Owns a bundled local view and native window; closing this plugin does not stop compute jobs",
+    "Explicit Talk uses a permitted shared local speech provider for microphone recognition and spoken replies. No audio goes to Fuego.",
+    "Own isolated human sign-in to Fuego; credentials are never imported from other apps",
+    "Sends a reviewed task to your private Fuego agent conversation; existing Fuego context, permissions and budget may apply",
+    "Reads run progress and final answers; requests cancellation of that exact run without retrying mutations",
+    "Stores up to 20 handoffs privately in plugin-owned local storage",
+    "Optional SDK actions list connected targets, prepare a draft for your review, and read one original handoff; draft creation cannot send a job",
+    "Optional reviewed workflow wait for an exact existing handoff, with live progress, confirmed remote Stop and a bounded result; no automatic Send or retry",
+    "Review Nook module names and notification indicators with a Fuego question; validated replies propose a local opening through normal Nook review",
+    "Talk shares words, module names and notification indicators with the selected Fuego agent until Stop. Openings still need Nook confirmation; no replay."
+  ],
+  "assistant": {
+    "name": "Ember",
+    "summary": "Your personal assistant through Fuego",
+    "avatar": "ember"
+  }
+}
