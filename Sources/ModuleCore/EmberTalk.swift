@@ -6,6 +6,13 @@ import NookPluginSDK
 /// A fresh local ticket binds each spoken reply to its still-active input turn.
 @MainActor public final class EmberTalk: ObservableObject {
     public let client = PluginSpeechConversationClient()
+    public let expression = PluginExpressionPlayback()
+    private var replyCue: PluginExpressionCue?
+    public private(set) var expressionEnabled = false
+    public func chooseExpression(_ enabled: Bool) throws {
+        guard active,client.ready else { throw ModuleProblem("Start Talk before enabling expressive delivery.") }
+        expressionEnabled=enabled; if !enabled { expression.clear() }; changed?()
+    }
     public var question: ((String, UUID) -> Void)?
     public var interrupted: ((UUID) -> Void)?
     public var changed: (() -> Void)?
@@ -21,6 +28,7 @@ import NookPluginSDK
     private var playing = false
     private var observation: AnyCancellable?
     public init() {
+        expression.changed = { [weak self] in self?.changed?() }
         client.event = { [weak self] in self?.receive($0) }
         client.ended = { [weak self] in self?.retire() }
         observation = client.objectWillChange.sink { [weak self] _ in Task { @MainActor in self?.changed?() } }
@@ -35,27 +43,29 @@ import NookPluginSDK
     }
     public func start() throws {
         guard !active else { throw ModuleProblem("Talk is already active.") }
-        turn = 0; ticket = nil; chunks = []; playing = false; partial = ""; level = 0
+        expression.clear(); replyCue = nil; turn = 0; ticket = nil; chunks = []; playing = false; partial = ""; level = 0
         phase = "preparing"; status = "Starting local speech…"
         try client.start(mode: mode); changed?()
     }
     public func stop() { client.stop(); retire(); changed?() }
     private func retire() {
+        expression.clear(); replyCue = nil
         let old = ticket; ticket = nil; chunks = []; playing = false
-        phase = "idle"; partial = ""; level = 0; outputLevel = 0; status = "Talk stopped"
+        expressionEnabled = false; phase = "idle"; partial = ""; level = 0; outputLevel = 0; status = "Talk stopped"
         if let old { interrupted?(old) }; changed?()
     }
     private func interrupt() {
         outputLevel = 0
+        expression.clear(); replyCue = nil
         let old = ticket; ticket = nil; chunks = []; playing = false
         // speechStarted/final are provider-originated boundaries. Voice has
         // already stopped its output. Echoing "interrupt" would switch the
         // provider to thinking and mute a half-duplex utterance mid-sentence.
         if let old { interrupted?(old) }
     }
-    public func answer(_ text: String, for expected: UUID) {
+    public func answer(_ text: String, for expected: UUID, cue: PluginExpressionCue? = nil) {
         guard active, client.ready, ticket == expected, !playing, chunks.isEmpty else { return }
-        do { chunks = try Self.segments(text); advance() }
+        do { replyCue = cue; chunks = try Self.segments(text); advance() }
         catch { stop(); status = error.localizedDescription }
         changed?()
     }
@@ -77,7 +87,7 @@ import NookPluginSDK
         do {
             if !chunks.isEmpty {
                 let text = chunks.removeFirst(); playing = true; phase = "speaking"; status = "Preparing speech…"
-                try client.input(PluginSpeechConversation.values("speak", text: text, turn: turn))
+                expression.stage(try client.speak(text, cue:expressionEnabled ? replyCue:nil, turn:turn))
             } else {
                 ticket = nil; phase = "listening"; status = "Listening"
                 try client.input(PluginSpeechConversation.values("listen", turn: turn))
@@ -110,10 +120,11 @@ import NookPluginSDK
                 answer("Please ask a shorter question, under six hundred bytes.", for: id); return
             }
             question?(words, id)
-        case "speaking": if playing { phase = "speaking"; status = "Speaking" }
+        case "expressionStarted": _ = expression.started(text("text"))
+        case "speaking": if playing,case .number(let n)=values["turn"],n==Double(turn) { phase = "speaking"; status = "Speaking" }
         case "played":
             guard case .number(let number) = values["turn"], number == Double(turn), playing else { return }
-            outputLevel = 0; playing = false; advance()
+            outputLevel = 0; expression.clear(); playing = false; advance()
         default: break
         }
         changed?()
