@@ -1,0 +1,5 @@
+[
+  {"count": 4, "available": true, "message": "Fixture · ready"},
+  {"count": 4, "available": false, "message": "Fixture · offline"},
+  {"count": 5, "available": true, "message": "Fixture · recovered"}
+]
