@@ -15,6 +15,24 @@ final class EmberTalkTests: XCTestCase {
         wire.output("playbackMeter",turn:1,level:0.8);XCTAssertEqual(talk.outputLevel,0)
         talk.stop();wire.output("playbackMeter",turn:1,level:0.8);XCTAssertEqual(talk.outputLevel,0)
     }
+    @MainActor func testExpressionStartsAtMatchingReceiptAndInterruptClearsIt() throws {
+        let (talk,wire)=try connected()
+        wire.output("expressionCapabilities",text:PluginExpressionCapability().encoded())
+        XCTAssertFalse(talk.expressionEnabled);try talk.chooseExpression(true)
+        wire.output("final",text:"I have exciting news",turn:1)
+        let id=try XCTUnwrap(talk.ticket);talk.answer("What is the news?",for:id,cue:.named("bright"))
+        XCTAssertEqual(talk.expression.pose,.init())
+        let payload=try XCTUnwrap(wire.sent.last?.frame?.values["text"])
+        guard case .string(let encoded)=payload else{return XCTFail("Missing envelope")}
+        let segment=try PluginExpressionSegment.decode(encoded)
+        wire.output("expressionStarted",text:segment.receipt.encoded(),turn:1)
+        XCTAssertNotEqual(talk.expression.pose,.init())
+        wire.output("speechStarted",turn:1)
+        XCTAssertEqual(talk.expression.pose,.init());XCTAssertEqual(talk.outputLevel,0)
+        wire.output("expressionStarted",text:segment.receipt.encoded(),turn:1)
+        XCTAssertEqual(talk.expression.pose,.init())
+        talk.stop();XCTAssertFalse(talk.expressionEnabled)
+    }
     @MainActor private func connected() throws -> (EmberTalk, SpeechWire) {
         let talk=EmberTalk(), wire=SpeechWire(talk)
         talk.client.catalog([.init(address:.init("test.local-speech","speech_conversation"),action:PluginSpeechConversation.action)])

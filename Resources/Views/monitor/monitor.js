@@ -146,6 +146,7 @@ function updateEmber(state) {
  const controls=parsed(state.voiceControls,null),sensitivity=$('emberSensitivity');
  $('emberMicrophoneName').textContent=voice&&controls?.microphone?controls.microphone:'Microphone';
  $('emberVoiceSettings').title=voice?'Change microphone · stops Talk':'Choose microphone and speech recognition';
+ $('emberExpression').checked=!!state.voiceExpressionEnabled;$('emberExpression').disabled=!state.voiceReady;
  $('emberVoiceEngine').textContent=controls?.recognition||'Shared local speech for Nero and Ember';
  sensitivity.disabled=!state.voiceReady||!controls;if(document.activeElement!==sensitivity)sensitivity.value=String(controls?.sensitivity??50);
  $('emberSensitivityValue').textContent=controls?sensitivity.value+'%':'—';
@@ -166,7 +167,7 @@ function updateEmber(state) {
  $('emberTalkAvatar').hidden=false;
  $('emberInputLevel').value=Math.max(0,Math.min(1,Number(state.voicePhase==='speaking'?state.voiceOutputLevel:state.voiceLevel)||0));
  $('emberInputLevel').setAttribute('aria-label',state.voicePhase==='speaking'?'Speech playback level':'Microphone level');
- document.querySelectorAll('.nook-presence').forEach(el=>window.NookAvatar?.speech(el,state.voiceOutputLevel||0,state.voiceActive&&state.voicePhase==='speaking'));
+ window.NookAvatar?.setBusy?.(!!state.voiceActive||(!!state.speechActive&&!state.reactionSpeaking));document.querySelectorAll('.nook-presence').forEach(el=>{window.NookAvatar?.speech(el,state.voiceOutputLevel||0,state.voiceActive&&state.voicePhase==='speaking');let pose={};try{pose=JSON.parse(state.voiceExpression||'{}')}catch{}window.NookAvatar?.expression(el,pose);});
  $('emberLiveWords').textContent=state.voicePartial||(state.voicePhase==='preparing'?'Preparing local speech…':state.voicePhase==='thinking'?'Ember is thinking…':state.voicePhase==='speaking'?'Ember is speaking…':'Listening…');
  const voiceStatus=state.voiceStatus||'';
  $('emberVoiceStatus').textContent=voice ? (voiceStatus||'Starting local speech…') : (/^(Press Talk|Allow a shared|Choose an allowed)/.test(voiceStatus)?'':voiceStatus);
@@ -240,3 +241,5 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')$('emberVoiceControl
 
 // Explicit click handling also supports nonactivating Nook panels.
 $('emberVoiceControls').querySelector('summary').onclick=e=>{e.preventDefault();$('emberVoiceControls').open=!$('emberVoiceControls').open;};
+
+$('emberExpression').onchange=()=>event('nook',{command:'voice_expression',text:String($('emberExpression').checked)});

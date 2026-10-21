@@ -145,6 +145,12 @@ import NookPluginSDK
     func handle(_ event: PluginViewEvent) throws {
         guard event.panelID == "monitor" else { throw ModuleProblem("Unknown Fuego view.") }
         try definition.validate(event)
+        if event.name == PluginAvatarPlayback.event {
+            guard case .string(let raw)=event.values["id"],let id=UUID(uuidString:raw),case .string(let kind)=event.values["kind"] else {throw ModuleProblem("Invalid avatar reaction.")}
+            if kind == "stop" {speech.stopReaction(id)}
+            else if let reaction=PluginAvatarReaction(rawValue:kind), !(talk.active || conversationTurn != nil && !conversationHandled) {try speech.react(reaction,id:id)}
+            publish();return
+        }
         switch event.name {
         // The active handoff view has its own revision. Do not revalidate its
         // toolbar events against the older compute-only view's revision.
@@ -177,6 +183,7 @@ import NookPluginSDK
                 stopTalk(); talk.client.select(key); UserDefaults.standard.set(key,forKey:"conversationProvider")
             case "voice_sensitivity":
                 guard case .string(let raw)=event.values["text"],let value=Int(raw) else { throw ModuleProblem("Choose a sensitivity from 0 to 100.") };try talk.client.setInterruptionSensitivity(value)
+            case "voice_expression":try talk.chooseExpression(NookConversationViewControl.expression(event.values))
             case "voice_settings": stopTalk(); try talk.client.openSettings(mode:talk.mode)
             case "stop_chat": if talk.active { stopTalk(cancelRuntime:true) } else { stopConversation(cancelRuntime:true) }
             case "open_chat":
@@ -298,6 +305,8 @@ import NookPluginSDK
     }
     var definition: PluginCustomView {
         var view = monitor.customView
+        view.avatarReactions=true;view.avatarPlayback=speech.avatarPlayback
+        view.state["reactionSpeaking"] = .boolean(speech.avatarPlayback != nil)
         let choices = speech.providers.map { ["key": $0.address.key, "name": $0.action?.title ?? $0.address.plugin] }
         view.state["speechProviders"] = .string(String(data: (try? JSONEncoder().encode(choices)) ?? Data(), encoding: .utf8) ?? "[]")
         view.state["speechProvider"] = .string(speech.selectedKey)
@@ -314,8 +323,10 @@ import NookPluginSDK
         view.state["voiceControls"] = .string((try? talk.client.controls?.encoded()) ?? "")
         view.state["voiceReady"] = .boolean(talk.client.ready)
         view.state["voiceMode"] = .string(talk.mode)
+        view.state["voiceExpressionEnabled"] = .boolean(talk.expressionEnabled)
         view.state["voiceLevel"] = .number(talk.level)
         view.state["voiceOutputLevel"] = .number(talk.outputLevel)
+        view.state["voiceExpression"] = .string(String(decoding:(try? JSONEncoder().encode(talk.expression.pose)) ?? Data(),as:UTF8.self))
         view.state["voiceReview"] = .boolean(voiceReview != nil)
         view.state["voiceTarget"] = .string(handoff.targets.first(where: { $0.id == (voiceReview?.target ?? voiceTarget?.target) })?.name ?? "")
         view.state["voiceProviders"] = .string(String(data:(try? JSONEncoder().encode(talk.client.providers.map { ["id":$0.address.key,"name":$0.address.plugin] })) ?? Data(),encoding:.utf8) ?? "[]")
@@ -327,7 +338,7 @@ import NookPluginSDK
         view.state["nookBusy"] = .boolean(workspace.busy)
         view.state["nookWatching"] = .boolean(workspace.watching)
         view.state["ownAttention"] = .boolean(attentionLedger?.attention != nil)
-        view.events += [.init("nook", input: .init([.init("command", .string), .init("id", .string, required: false), .init("text", .string, required: false)]))]
+        view.events += [NookConversationViewControl.definition]
         view.state["chatQuestion"] = .string(conversationQuestion)
         view.state["chatAnswer"] = .string(conversationAnswer)
         view.state["chatStatus"] = .string(conversationStatus)
@@ -380,7 +391,7 @@ import NookPluginSDK
         var snapshot = monitor.snapshot(customViews: customViews)
         if customViews { snapshot.panels = [.init("monitor", "Jobs", customView: definition)] }
         snapshot.status = handoff.activeJob?.detail ?? handoff.message
-        snapshot.assistantSpeech = .init(speaking:talk.phase == "speaking",level:talk.outputLevel)
+        snapshot.assistantSpeech = .init(speaking:talk.phase == "speaking",level:talk.outputLevel,expression:talk.expression.pose)
         snapshot.attention = attentionLedger?.attention
         if let review=handoff.review {
             snapshot.attention = .init(id:review.id.uuidString,kind:.needsYou,title:"Ember has a task for review")
@@ -415,8 +426,8 @@ import NookPluginSDK
             await handoff.approve(review.id); self.conversationSubmitting=false; self.publish()
         }
     }
-    private func answerVoice(_ text: String) {
-        if let ticket=conversationVoiceTicket { talk.answer(text,for:ticket) }
+    private func answerVoice(_ text: String, cue: PluginExpressionCue? = nil) {
+        if let ticket=conversationVoiceTicket { talk.answer(text,for:ticket,cue:cue) }
     }
     private func stopTalk(cancelRuntime: Bool = false) {
         voiceReview=nil; voiceTarget=nil
@@ -490,7 +501,7 @@ import NookPluginSDK
                         try workspace.open(proposal.id)
                         answerVoice(response.answer + " Review opening " + proposal.name + " in the Nook.")
                     } catch { conversationOpening=false; answerVoice(response.answer + " " + error.localizedDescription) }
-                } else { answerVoice(response.answer) }
+                } else { answerVoice(response.answer,cue:response.cue) }
             }
         } catch { conversationStatus=error.localizedDescription; answerVoice(conversationStatus) }
     }

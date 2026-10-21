@@ -1,3 +1,4 @@
+#if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import AppKit
 import SwiftUI
 
@@ -6,6 +7,7 @@ import SwiftUI
     private var windows: [String: NSWindow] = [:]
     public init() {}
     public func show<Content: View>(_ id: String, title: String, size: CGSize = CGSize(width: 800, height: 450), @ViewBuilder content: () -> Content) {
+        PluginApplication.configure()
         let window: NSWindow
         if let existing = windows[id] { window = existing }
         else {
@@ -18,3 +20,5 @@ import SwiftUI
     public func close(_ id: String) { windows.removeValue(forKey: id)?.close() }
     public func closeAll() { for window in windows.values { window.close() }; windows = [:] }
 }
+
+#endif
