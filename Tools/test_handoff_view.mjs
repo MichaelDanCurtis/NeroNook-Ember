@@ -26,8 +26,16 @@ update(state);nodes.target.value='a';nodes.task.value='Keep this exact task';nod
 nodes.reviewTask.onclick();assert.equal(calls.at(-1).name,'review_task');assert.equal(calls.at(-1).args.task,'Keep this exact task');
 update({...state,phase:'Ready'});assert.equal(nodes.task.value,'Keep this exact task');
 nodes.task.value='🐈'.repeat(513);nodes.task.oninput();assert.equal(nodes.reviewTask.disabled,true);
-update({...state,review:JSON.stringify({id:'r',task:'Original task',server:'https://fuego.example.org',agent:'Agent',organization:'Company',device:'Device',workspace:'Owned work',provider:'Codex',account:'Account',instructions:'Standing instructions'})});
+const reviewState={...state,review:JSON.stringify({id:'r',task:'Original task',server:'https://fuego.example.org',agent:'Agent',organization:'Company',device:'Device',workspace:'Owned work',provider:'Codex',account:'Account',instructions:'Standing instructions'})};
+nodes.nookTab.onclick();assert.equal(nodes.handoffPage.hidden,true);
+update(reviewState);
 assert.equal(nodes.composer.hidden,true);assert.equal(nodes.review.hidden,false);assert.equal(nodes.reviewTaskText.textContent,'Original task');
+assert.equal(nodes.handoffPage.hidden,false,'A new shared handoff must show its review');assert.equal(nodes.nookPage.hidden,true);
+nodes.nookTab.onclick();update(reviewState);
+assert.equal(nodes.nookPage.hidden,false,'Polling the same review must not force navigation away from Conversation');
+update({...reviewState,review:JSON.stringify({...JSON.parse(reviewState.review),id:'next-review'})});
+assert.equal(nodes.handoffPage.hidden,false,'A distinct prepared review must come forward');
+update(reviewState);
 nodes.toggleInstructions.onclick();assert.equal(nodes.instructionsBody.hidden,false);assert.equal(nodes.toggleInstructions['aria-expanded'],'true');
 nodes.sendTask.onclick();assert.equal(calls.at(-1).name,'send_task');assert.equal(calls.at(-1).args.id,'r');
 const job={id:'j',task:'Original task',phase:'Cancellation requested',state:'cancelling',agent:'Agent',workspace:'Owned work',detail:'Waiting for actual stop',result:'',events:['Accepted'],issue:'FUE-1',run:'run-id',canCancel:false,canOpen:true,admitted:true,lastRead:Date.now()/1000};

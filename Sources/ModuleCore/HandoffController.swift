@@ -72,6 +72,13 @@ public struct HandoffReview: Equatable {
     @Published public var selectedJob: UUID?
     private var generation = 0
     private var reading = false
+    // A preflight refusal has no remote job receipt. Keep a bounded, exact-ID
+    // outcome so workflow observers cannot mistake it for the user pressing Back.
+    private var reviewFailures: [UUID: (server: String, message: String, date: Date)] = [:]
+    public func reviewFailure(_ id: UUID, server: String) -> String? {
+        guard let failure = reviewFailures[id], failure.server == server else { return nil }
+        return failure.message
+    }
     public init(api: FuegoAPI, store: HandoffStore, route: HandoffRoute = .task) {
         self.api = api; self.store = store; self.route = route
         do { jobs = try store.load(); selectedJob = jobs.first?.id } catch { storageFailed = true; message = HandoffProblem.storage.localizedDescription }
@@ -187,7 +194,13 @@ public struct HandoffReview: Equatable {
                 }
                 try? persist(); message = safe(error)
             }
-        } catch { message = safe(error) }
+        } catch {
+            message = safe(error)
+            if !jobs.contains(where: { $0.id == proposal.id }) {
+                if reviewFailures.count >= 20, let oldest = reviewFailures.min(by: { $0.value.date < $1.value.date })?.key { reviewFailures[oldest] = nil }
+                reviewFailures[proposal.id] = (proposal.server, message, now)
+            }
+        }
     }
     private func update(_ id: UUID, _ body: (inout HandoffJob) -> Void) { if let index = jobs.firstIndex(where: { $0.id == id }) { body(&jobs[index]) } }
     private func receiveRun(_ id: UUID, _ object: [String: Any]) throws {

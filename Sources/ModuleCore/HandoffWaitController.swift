@@ -44,7 +44,9 @@ import NookPluginSDK
             }
             guard let original = controller.jobs.first(where: { $0.id == wait.handoffID && $0.server == wait.server }) else {
                 if controller.busy { send?(request, .init(wait.stop ? .cancelling : .running, message: "Checking this exact handoff before sending; waiting for its saved receipt.")) }
-                else { finish(request, .init(.cancelled, message: "Fuego review closed without a saved handoff. No job was submitted by this wait action.")) }
+                else if let failure = controller.reviewFailure(wait.handoffID, server: wait.server) {
+                    finish(request, .init(.failed, message: String(("Ember could not submit this request: " + failure + " No job was submitted.").prefix(500))))
+                } else { finish(request, .init(.cancelled, message: "Fuego review closed without a saved handoff. No job was submitted by this wait action.")) }
                 continue
             }
             if wait.stop, !original.phase.settled, !original.cancelSent, original.run != nil, !controller.busy { await controller.cancel(original.id) }

@@ -204,9 +204,25 @@ private func snapshot(_ job: HandoffJob?, status: String = "pending", run: Bool 
     }
     func testExistingUnsettledTurnBlocksBeforeAnyWrite() async throws {
         let api = ConversationAPI(), model = try await prepared(api); api.busy = true
-        await model.approve(model.review!.id)
+        let id = model.review!.id
+        let waiter = HandoffWaitController(controller: model), request = UUID()
+        var last: PluginRunUpdate?
+        waiter.send = { _, update in last = update }
+        try waiter.start(request, values: ["request_id": .string(id.uuidString)])
+        await model.approve(id); await waiter.tick()
         XCTAssertEqual(api.sends, 0); XCTAssertTrue(model.jobs.isEmpty)
         XCTAssertTrue(model.message.contains("unsettled turn"))
+        XCTAssertEqual(last?.phase, .failed)
+        XCTAssertTrue(last?.message.contains("unsettled turn") == true)
+        XCTAssertTrue(last?.message.contains("No job was submitted") == true)
+        XCTAssertNil(model.reviewFailure(id, server: "https://different.example"))
+        // A later draft cannot erase the original refusal or inherit it.
+        try model.prepare(target: agentID, task: "Another explicitly reviewed task.")
+        let newID = model.review!.id
+        XCTAssertNil(model.reviewFailure(newID, server: api.server))
+        XCTAssertNotNil(model.reviewFailure(id, server: api.server))
+        api.busy = false; await model.approve(newID)
+        XCTAssertEqual(api.sends, 1); XCTAssertEqual(model.jobs.first?.id, newID)
     }
     func testSavedPendingTurnWithoutRunResolvesByReadingOriginalRequest() async throws {
         let api = ConversationAPI(); api.withRun = false
@@ -220,6 +236,7 @@ private func snapshot(_ job: HandoffJob?, status: String = "pending", run: Bool 
         let api = ConversationAPI(), model = try await prepared(api); api.lostSend = true
         await model.approve(model.review!.id)
         XCTAssertEqual(model.jobs[0].phase, .uncertain); XCTAssertFalse(model.canSubmit)
+        XCTAssertNil(model.reviewFailure(model.jobs[0].id, server: api.server), "A lost POST response is not a confirmed preflight refusal")
         let reopened = controller(api); await reopened.reconcile(reopened.jobs[0].id)
         XCTAssertEqual(reopened.jobs[0].phase, .queued); XCTAssertEqual(reopened.jobs[0].run, runID)
         XCTAssertEqual(api.sends, 1); XCTAssertTrue(reopened.canSubmit)

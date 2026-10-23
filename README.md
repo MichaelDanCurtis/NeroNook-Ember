@@ -1,3 +1,11 @@
+**October 22 · local 0.5.13 installed:** newly prepared shared handoffs show their
+review immediately without polling stealing navigation. Confirmed preflight
+refusals report failed to the exact waiting workflow; lost send acknowledgements
+remain uncertain. Eighty Swift tests and view/request checks pass. The actual
+Gmail sample is blocked by the older Oct 19 Fuego conversation's unconfirmed
+cancellation; no new test job or reply draft. Existing scopes retained, no public
+change. [Installed evidence and limits](../../../NeroNook/reports/nero-flow-install-2026-10-22/README.md).
+
 **October 20 · local 0.5.10:** avatar tickle and playful Zoom use the current local speech selection through the shared SDK, with measured mouths, exact cancellation and a silent Wave/Twirl menu. Existing voice settings and action scopes are retained. [Installed checks and limits](../../../NeroNook/reports/avatar-playful-reactions-2026-10-20/README.md). Local only.
 
 **October 19 · local 0.5.6 installed:** shared native/web avatar articulation adds larger pointer-following turns, tilt, lean and a floating offset. Eyes and speech remain independent. [Qualification and limits](../../../NeroNook/reports/avatar-articulation-2026-10-19/README.md). Local only.
