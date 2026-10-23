@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 const html=fs.readFileSync(new URL('../Resources/Views/monitor/index.html',import.meta.url),'utf8');
 assert.ok(html.includes('Fuego may include your existing conversation context.'));
 class Node {
-  constructor(){this.dataset={};this.value='';this.hidden=false;this.children=[];this.textContent='';this.classList={add(){},remove(){}};}
+  constructor(){this.dataset={};this.value='';this.hidden=false;this.children=[];this.textContent='';this.classList={add(){},remove(){},toggle(){}};}
+  querySelector(){return this.summary ??= new Node();}
+  contains(){return false;}
   setAttribute(key,value){this[key]=value;}
   add(n){this.children.push(n);}
   append(...n){this.children.push(...n);}
@@ -13,7 +15,7 @@ class Node {
 }
 const nodes=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Node()]));
 const calls=[];let update;
-const sandbox={document:{getElementById:id=>{assert.ok(nodes[id],id);return nodes[id];},createElement:()=>new Node()},
+const sandbox={window:{},document:{body:new Node(),querySelectorAll:()=>[],addEventListener(){},getElementById:id=>{assert.ok(nodes[id],id);return nodes[id];},createElement:()=>new Node()},
   Option:class extends Node{constructor(name,id){super();this.textContent=name;this.value=id;}},
   TextEncoder,Date,JSON,Set,console,nero:{onState:fn=>{update=fn;fn({});},emit:async(name,args)=>calls.push({name,args})}};
 vm.runInNewContext(fs.readFileSync(new URL('../Resources/Views/monitor/monitor.js',import.meta.url),'utf8'),sandbox);
@@ -104,5 +106,7 @@ update({...state,voiceActive:false,voiceStatus:'The microphone stopped respondin
 assert.ok(nodes.emberVoiceStatus.textContent.includes('microphone stopped responding'),'A failed speech provider must stay visible after the session retires');
 
 update({...state,voiceActive:true,voicePhase:'preparing',voiceLevel:0});
-assert.equal(nodes.emberLiveWords.textContent,'Preparing local speech…','Never claim Listening before the shared provider is ready');
+assert.equal(nodes.emberPresenceStatus.textContent,'Preparing','Never claim Listening before the shared provider is ready');
+assert.equal(nodes.emberHeading.textContent,'Getting ready…');
+assert.equal(nodes.emberLiveWords.hidden,true,'No fabricated transcript before recognition is ready');
 update({...state,voiceActive:true,voicePhase:'listening',voiceLevel:.75});assert.equal(nodes.emberInputLevel.value,.75);

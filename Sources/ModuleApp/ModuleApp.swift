@@ -95,7 +95,7 @@ import NookPluginSDK
         guard let url = Bundle.main.url(forResource: "NookPlugin", withExtension: "json"),
               let data = try? Data(contentsOf: url), let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data),
               manifest.id == Self.pluginID, (try? manifest.validate()) != nil else {
-            FileHandle.standardError.write(Data("Fuego Agent packaging is invalid.\n".utf8)); exit(1)
+            FileHandle.standardError.write(Data("Ember packaging is invalid.\n".utf8)); exit(1)
         }
         if hosted {
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -140,7 +140,7 @@ import NookPluginSDK
     }
     func openWindow() {
         guard !testing else { return }
-        windows.show("fuego", title: "Fuego Agent", size: .init(width: 900, height: 560)) { FuegoDashboard(model: self) }
+        windows.show("fuego", title: "Ember", size: .init(width: 900, height: 560)) { FuegoDashboard(model: self) }
     }
     func handle(_ event: PluginViewEvent) throws {
         guard event.panelID == "monitor" else { throw ModuleProblem("Unknown Fuego view.") }
@@ -518,7 +518,7 @@ struct FuegoDashboard: View {
         VStack(spacing: 0) {
             if let root = Bundle.main.resourceURL?.appendingPathComponent("Views") {
                 PluginWebSurface(root: root, panelID: "monitor", definition: model.definition) { try model.handle($0) }
-            } else { Text("Package Fuego Agent to load its local view.").padding(30) }
+            } else { Text("Package Ember to load its local view.").padding(30) }
         }.frame(minWidth: 620, minHeight: 350)
     }
 }
@@ -537,8 +537,8 @@ struct FuegoDashboard: View {
         _model = StateObject(wrappedValue: FuegoModel())
     }
     var body: some Scene {
-        WindowGroup(model.hosted ? "Fuego Agent Launcher" : "Fuego Agent") { FuegoDashboard(model: model).pluginThemed().onAppear {
-            if model.hosted { NSApp.windows.first(where: { $0.title == "Fuego Agent Launcher" })?.orderOut(nil) }
+        WindowGroup(model.hosted ? "Ember Launcher" : "Ember") { FuegoDashboard(model: model).pluginThemed().onAppear {
+            if model.hosted { NSApp.windows.first(where: { $0.title == "Ember Launcher" })?.orderOut(nil) }
         } }
     }
 }

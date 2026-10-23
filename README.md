@@ -81,7 +81,7 @@ Stop passed. This adds audible status output, not job dispatch. Ember desktop
 speech and independent Fuego Compute remain unchanged. Ten tests and signed
 package/process checks pass.
 
-# Fuego Agent for Nero Nook
+# Ember for Nero Nook
 
 An independent native macOS plugin with reviewed task handoff, a durable Jobs card and this Mac’s signed Fuego Compute status. The plugin has its own account session, bundled Nook view and separate native window. Fuego owns execution, permissions and admission. No provider credentials or unrelated Nook context are copied.
 
@@ -129,3 +129,7 @@ The bundled HTML/CSS/JavaScript receives bounded scalar view state through the S
 
 Selected desktop/messaging events and remote control remain later slices. Reviewed per-user task handoff is now implemented separately from this monitor. This monitor does not claim the full M4 desktop/Ember milestone.
 
+
+## Naming and Nero Flow
+
+Ember is this independent assistant module. Fuego is its backend and account service; Nero Flow is NeroNook’s local workflow editor. This module retains `cloud.fuego.nook-agent` and existing handoff capability definitions so saved grants, workflows and Stream Deck bindings are not silently invalidated. Legacy action titles still mention Fuego. Preparing a task never sends it; review the target and task before Send.

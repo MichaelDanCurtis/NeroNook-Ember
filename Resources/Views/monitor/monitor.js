@@ -186,7 +186,7 @@ function updateEmber(state) {
  $('emberStatus').textContent=state.chatStatus||'';
  $('emberStatus').hidden=!/(failed|error|unavailable|unexpected|could not|declined|expired|finish the|connect)/i.test(state.chatStatus||'');
  const phase=state.voicePhase||'idle',titles={listening:'I’m listening.',thinking:'Let me think.',speaking:'Here’s what I found.',preparing:'Getting ready…',permission:'Connect your voice.'};
- $('emberHeading').textContent=voice?(titles[phase]||'Talk with Ember.'):(state.chatBusy?'Let me check.':state.canSubmit?($('emberTarget').value?'What can I help with?':'Choose your Fuego assistant.'):'Connect to your assistant.');
+ $('emberHeading').textContent=voice?(titles[phase]||'Talk with Ember.'):(state.chatBusy?'Let me check.':state.canSubmit?($('emberTarget').value?'What can I help with?':'Choose your Ember agent.'):'Connect to your assistant.');
  $('emberSubtitle').textContent=voice?(phase==='listening'?'Take your time.':phase==='speaking'?(state.voiceMode==='full'?'You can interrupt me.':'I’ll listen when I finish.'):'One moment.'):'Ember uses your Fuego account.';
  $('emberLiveWords').textContent=voice?(state.voicePartial||(phase==='speaking'?state.chatAnswer||'':phase==='thinking'?state.chatQuestion||'':'')):'';
  $('emberLiveWords').hidden=!voice||!$('emberLiveWords').textContent;

@@ -49,6 +49,6 @@ public struct MonitorState: Equatable, Sendable {
         let panels: [PluginPanel]
         if customViews { panels = [.init("monitor", "Compute", customView: customView)] }
         else { panels = [.init("monitor", "Compute", sections: [.init("Connection", detail)] + jobs.prefix(8).map { .init(String($0.runId.uuidString.prefix(8)), "Codex · \($0.state.rawValue)") })] }
-        return .init(title: "Fuego Agent", status: detail, activity: "\(title) · \(status?.activeJobs ?? 0) active", fields: [.init("Compute", title), .init("Active jobs", String(status?.activeJobs ?? 0)), .init("Uncertain jobs", String(status?.uncertainJobs ?? 0))], actions: actions, badge: title, panels: panels)
+        return .init(title: "Ember", status: detail, activity: "\(title) · \(status?.activeJobs ?? 0) active", fields: [.init("Compute", title), .init("Active jobs", String(status?.activeJobs ?? 0)), .init("Uncertain jobs", String(status?.uncertainJobs ?? 0))], actions: actions, badge: title, panels: panels)
     }
 }
