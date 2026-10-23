@@ -1,3 +1,9 @@
+**October 23 · installed live reply path verified:** the owner-requested old
+startup cancellation is reconciled with locked Dispatch non-admission proof.
+One actual Gmail → Ember → local reply workflow completes. The edited draft
+saves and reopens exactly after a managed Google restart; no reply email is sent.
+App binaries remain unchanged. [Evidence and limits](../../../NeroNook/reports/nero-flow-recovery-2026-10-23/README.md).
+
 **October 22 · local 0.5.13 installed:** newly prepared shared handoffs show their
 review immediately without polling stealing navigation. Confirmed preflight
 refusals report failed to the exact waiting workflow; lost send acknowledgements
