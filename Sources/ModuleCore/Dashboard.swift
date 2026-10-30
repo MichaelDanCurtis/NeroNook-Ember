@@ -29,6 +29,14 @@ public struct MonitorState: Equatable, Sendable {
         .init([.init("available", .boolean), .init("connected", .boolean), .init("ready", .boolean), .init("phase", .string), .init("active_jobs", .number, minimum: 0), .init("uncertain_jobs", .number, minimum: 0), .init("paused", .boolean), .init("observed_at", .number, minimum: 0)])
     }
     public static var readAction: PluginRegisteredAction { .init("read_status", title: "Read Fuego compute status", output: schema, effect: .readOnly, timeoutSeconds: 5) }
+    /// Declaration for this cached metadata action only. Negotiation never grants invocation authority.
+    public static func readAction(negotiatedFeatures: Set<String>) -> PluginRegisteredAction {
+        var action = readAction
+        if negotiatedFeatures.isSuperset(of: ["actions-v1", "action-policy-v1"]) {
+            action.executionPolicy = .init()
+        }
+        return action
+    }
     public var customView: PluginCustomView {
         let data = (try? JSONEncoder().encode(status?.recentJobs ?? [])) ?? Data("[]".utf8)
         var viewState = values
@@ -49,6 +57,6 @@ public struct MonitorState: Equatable, Sendable {
         let panels: [PluginPanel]
         if customViews { panels = [.init("monitor", "Compute", customView: customView)] }
         else { panels = [.init("monitor", "Compute", sections: [.init("Connection", detail)] + jobs.prefix(8).map { .init(String($0.runId.uuidString.prefix(8)), "Codex · \($0.state.rawValue)") })] }
-        return .init(title: "Fuego Agent", status: detail, activity: "\(title) · \(status?.activeJobs ?? 0) active", fields: [.init("Compute", title), .init("Active jobs", String(status?.activeJobs ?? 0)), .init("Uncertain jobs", String(status?.uncertainJobs ?? 0))], actions: actions, badge: title, panels: panels)
+        return .init(title: "Ember", status: detail, activity: "\(title) · \(status?.activeJobs ?? 0) active", fields: [.init("Compute", title), .init("Active jobs", String(status?.activeJobs ?? 0)), .init("Uncertain jobs", String(status?.uncertainJobs ?? 0))], actions: actions, badge: title, panels: panels)
     }
 }

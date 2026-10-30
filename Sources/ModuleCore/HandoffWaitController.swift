@@ -23,7 +23,7 @@ import NookPluginSDK
               controller.jobs.contains(where: { $0.id == id && $0.server == controller.api.server }) ||
                 (controller.review?.id == id && controller.review?.server == controller.api.server) else { throw HandoffProblem.invalid }
         waits[request] = .init(handoffID: id, server: controller.api.server, deadline: now.addingTimeInterval(3600))
-        send?(request, .init(.running, message: "Waiting for this exact Fuego handoff. Review and Send remain in Fuego Agent."))
+        send?(request, .init(.running, message: "Waiting for this exact Fuego handoff. Review and Send remain in Ember."))
     }
     public func requestCancel(_ request: UUID) { waits[request]?.stop = true }
     public func tick(now: Date = Date()) async {
@@ -44,7 +44,9 @@ import NookPluginSDK
             }
             guard let original = controller.jobs.first(where: { $0.id == wait.handoffID && $0.server == wait.server }) else {
                 if controller.busy { send?(request, .init(wait.stop ? .cancelling : .running, message: "Checking this exact handoff before sending; waiting for its saved receipt.")) }
-                else { finish(request, .init(.cancelled, message: "Fuego review closed without a saved handoff. No job was submitted by this wait action.")) }
+                else if let failure = controller.reviewFailure(wait.handoffID, server: wait.server) {
+                    finish(request, .init(.failed, message: String(("Ember could not submit this request: " + failure + " No job was submitted.").prefix(500))))
+                } else { finish(request, .init(.cancelled, message: "Fuego review closed without a saved handoff. No job was submitted by this wait action.")) }
                 continue
             }
             if wait.stop, !original.phase.settled, !original.cancelSent, original.run != nil, !controller.busy { await controller.cancel(original.id) }
@@ -54,7 +56,7 @@ import NookPluginSDK
             switch job.phase {
             case .succeeded:
                 let result = HandoffJob.bounded(job.result, bytes: 2048)
-                finish(request, .init(.succeeded, message: "Fuego completed this exact request. Its answer is in Result; the full answer remains in Fuego Agent.", values: ["request_id": .string(job.id.uuidString), "run_id": .string(job.run?.uuidString ?? ""), "result": .string(result), "result_truncated": .boolean(result != job.result)]))
+                finish(request, .init(.succeeded, message: "Fuego completed this exact request. Its answer is in Result; the full answer remains in Ember.", values: ["request_id": .string(job.id.uuidString), "run_id": .string(job.run?.uuidString ?? ""), "result": .string(result), "result_truncated": .boolean(result != job.result)]))
             case .cancelled:
                 finish(request, .init(.cancelled, message: "Fuego confirmed this exact turn stopped. Completed effects were not undone."))
             case .failed, .skipped:

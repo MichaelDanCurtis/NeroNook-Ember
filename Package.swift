@@ -3,8 +3,8 @@ import PackageDescription
 let package = Package(name: "FuegoNookAgent", platforms: [.macOS(.v14)], products: [
     .executable(name: "ModuleApp", targets: ["ModuleApp"]),
     .executable(name: "PluginCheck", targets: ["PluginCheck"])
-], dependencies: [.package(path: "Vendor/NookPluginSDK")], targets: [
-    .target(name: "ModuleCore", dependencies: [.product(name: "NookPluginSDK", package: "NookPluginSDK")]),
+], dependencies: [.package(path: "Vendor/NookPluginSDK"), .package(path: "../bridge-status")], targets: [
+    .target(name: "ModuleCore", dependencies: [.product(name: "NookPluginSDK", package: "NookPluginSDK"), .product(name: "FuegoBridgeStatus", package: "bridge-status")]),
     .executableTarget(name: "ModuleApp", dependencies: ["ModuleCore", .product(name: "NookPluginSDK", package: "NookPluginSDK")]),
     .executableTarget(name: "PluginCheck", dependencies: [.product(name: "NookPluginSDK", package: "NookPluginSDK")]),
     .testTarget(name: "ModuleCoreTests", dependencies: ["ModuleCore"])

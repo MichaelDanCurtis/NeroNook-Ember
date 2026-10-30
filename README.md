@@ -1,3 +1,17 @@
+**October 23 · installed live reply path verified:** the owner-requested old
+startup cancellation is reconciled with locked Dispatch non-admission proof.
+One actual Gmail → Ember → local reply workflow completes. The edited draft
+saves and reopens exactly after a managed Google restart; no reply email is sent.
+App binaries remain unchanged. [Evidence and limits](../../../NeroNook/reports/nero-flow-recovery-2026-10-23/README.md).
+
+**October 22 · local 0.5.13 installed:** newly prepared shared handoffs show their
+review immediately without polling stealing navigation. Confirmed preflight
+refusals report failed to the exact waiting workflow; lost send acknowledgements
+remain uncertain. Eighty Swift tests and view/request checks pass. The actual
+Gmail sample is blocked by the older Oct 19 Fuego conversation's unconfirmed
+cancellation; no new test job or reply draft. Existing scopes retained, no public
+change. [Installed evidence and limits](../../../NeroNook/reports/nero-flow-install-2026-10-22/README.md).
+
 **October 20 · local 0.5.10:** avatar tickle and playful Zoom use the current local speech selection through the shared SDK, with measured mouths, exact cancellation and a silent Wave/Twirl menu. Existing voice settings and action scopes are retained. [Installed checks and limits](../../../NeroNook/reports/avatar-playful-reactions-2026-10-20/README.md). Local only.
 
 **October 19 · local 0.5.6 installed:** shared native/web avatar articulation adds larger pointer-following turns, tilt, lean and a floating offset. Eyes and speech remain independent. [Qualification and limits](../../../NeroNook/reports/avatar-articulation-2026-10-19/README.md). Local only.
@@ -81,7 +95,7 @@ Stop passed. This adds audible status output, not job dispatch. Ember desktop
 speech and independent Fuego Compute remain unchanged. Ten tests and signed
 package/process checks pass.
 
-# Fuego Agent for Nero Nook
+# Ember for Nero Nook
 
 An independent native macOS plugin with reviewed task handoff, a durable Jobs card and this Mac’s signed Fuego Compute status. The plugin has its own account session, bundled Nook view and separate native window. Fuego owns execution, permissions and admission. No provider credentials or unrelated Nook context are copied.
 
@@ -129,3 +143,7 @@ The bundled HTML/CSS/JavaScript receives bounded scalar view state through the S
 
 Selected desktop/messaging events and remote control remain later slices. Reviewed per-user task handoff is now implemented separately from this monitor. This monitor does not claim the full M4 desktop/Ember milestone.
 
+
+## Naming and Nero Flow
+
+Ember is this independent assistant module. Fuego is its backend and account service; Nero Flow is NeroNook’s local workflow editor. This module retains `cloud.fuego.nook-agent` and existing handoff capability definitions so saved grants, workflows and Stream Deck bindings are not silently invalidated. Legacy action titles still mention Fuego. Preparing a task never sends it; review the target and task before Send.

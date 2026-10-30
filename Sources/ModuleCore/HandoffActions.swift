@@ -38,6 +38,6 @@ public enum HandoffActions {
               case .string(let task) = values["task"], controller.review == nil else { throw HandoffProblem.invalid }
         try controller.prepare(target: id, task: task)
         guard let review = controller.review else { throw HandoffProblem.invalid }
-        return ["review_id": .string(review.id.uuidString), "message": .string("Draft ready in Fuego Agent. Review its target, instructions and task, then choose Send. No message or job has been submitted.")]
+        return ["review_id": .string(review.id.uuidString), "message": .string("Draft ready in Ember. Review its target, instructions and task, then choose Send. No message or job has been submitted.")]
     }
 }

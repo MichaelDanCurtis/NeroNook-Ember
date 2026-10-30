@@ -1,9 +1,9 @@
 {
   "id": "cloud.fuego.nook-agent",
-  "name": "Fuego Agent",
-  "version": "0.5.11",
+  "name": "Ember",
+  "version": "0.5.13",
   "apiVersion": 1,
-  "summary": "Reviewed Fuego task handoff with durable run tracking, progress, cancellation and results.",
+  "summary": "Ember assistant with Fuego-backed agents, reviewed tasks, live progress and results.",
   "icon": {
     "symbol": "flame.fill",
     "color": "FF6B35"
