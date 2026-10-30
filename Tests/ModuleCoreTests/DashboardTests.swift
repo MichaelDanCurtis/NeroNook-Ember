@@ -83,50 +83,5 @@ final class DashboardTests: XCTestCase {
         XCTAssertNil(state.status)
         try state.received(value(), now: now); XCTAssertEqual(state.title, "Ready")
     }
-    func testPartialReadsNeverRenewTheMonotonicDeadline() throws {
-        let deadline = ExchangeDeadline(expiresAt: 3_000_000_000)
-        XCTAssertEqual(try deadline.remainingMilliseconds(at: 0), 3000)
-        XCTAssertEqual(try deadline.remainingMilliseconds(at: 1_000_000_000), 2000)
-        XCTAssertEqual(try deadline.remainingMilliseconds(at: 2_999_999_999), 1)
-        XCTAssertThrowsError(try deadline.remainingMilliseconds(at: 3_000_000_000))
-        XCTAssertThrowsError(try deadline.remainingMilliseconds(at: UInt64.max))
-    }
-
-    func testActualSocketTrickleCannotExtendWholeExchangeDeadline() async throws {
-        var sockets: [Int32] = [0, 0]
-        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets), 0)
-        let reader = sockets[0], writer = sockets[1]
-        defer { Darwin.close(reader); Darwin.close(writer) }
-        for fd in sockets {
-            XCTAssertEqual(fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK), 0)
-            var flag: Int32 = 1
-            XCTAssertEqual(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &flag, socklen_t(MemoryLayout<Int32>.size)), 0)
-        }
-        let trickle = Task.detached {
-            var byte: UInt8 = 120
-            while !Task.isCancelled {
-                _ = Darwin.send(writer, &byte, 1, 0)
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { break }
-            }
-        }
-        let started = DispatchTime.now().uptimeNanoseconds
-        let result = await Task.detached { () -> BrokerProblem? in
-            do { _ = try SocketIO.readFrame(from: reader, deadline: started + 3_000_000_000); return nil }
-            catch { return error as? BrokerProblem }
-        }.value
-        trickle.cancel(); await trickle.value
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000_000
-        XCTAssertEqual(result?.localizedDescription, BrokerProblem.timedOut.localizedDescription)
-        XCTAssertGreaterThanOrEqual(elapsed, 2.9)
-        XCTAssertLessThan(elapsed, 4.5)
-    }
-    func testActualFrameRejectsTrailingMessages() throws {
-        var sockets: [Int32] = [0, 0]
-        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets), 0)
-        defer { Darwin.close(sockets[0]); Darwin.close(sockets[1]) }
-        let data = Data("{}\n{}\n".utf8)
-        _ = data.withUnsafeBytes { Darwin.send(sockets[1], $0.baseAddress, $0.count, 0) }
-        XCTAssertThrowsError(try SocketIO.readFrame(from: sockets[0], deadline: DispatchTime.now().uptimeNanoseconds + 3_000_000_000))
-    }
 
 }

@@ -119,6 +119,14 @@ import NookPluginSDK
         } }
         self.timer = timer; RunLoop.main.add(timer, forMode: .common)
     }
+    /// On-demand local projection only. No automatic read, SDK grant or UI hook.
+    /// Never select a different company or use this observation for admission.
+    func connectionDiagnostic() async -> FuegoConnectionDiagnostic {
+        let selected = handoff.company
+        guard let connection else { return .unknown(company: selected) }
+        let value = await connection.connectionDiagnostic(company: selected)
+        return value.checked(company: handoff.company, samePage: !Task.isCancelled && self.connection === connection)
+    }
     func refresh() {
         guard !testing, readTask == nil else { return }
         generation += 1; let current = generation; refreshing = true
@@ -247,12 +255,13 @@ import NookPluginSDK
             session = message.session; PluginAppearanceStore.shared.beginSession(pluginID:Self.pluginID,session:message.session)
             customViews = message.features?.contains("custom-views-v1") == true
             busEnabled = message.features?.contains("actions-v1") == true
+            let statusAction = MonitorState.readAction(negotiatedFeatures: Set(message.features ?? []))
             workspace.accessRequestsAvailable = busEnabled && message.features?.contains("action-access-v1") == true
             longActions = busEnabled && message.features?.contains("actions-long-running-v1") == true
             streamActions = longActions && message.features?.contains("action-stream-v1") == true
             talk.client.accessRequestsAvailable = streamActions && workspace.accessRequestsAvailable
-            emit("ready", features: ["appearance-v1", "dashboard-v1", "panels-v1"] + (customViews ? ["custom-views-v1"] : []) + (busEnabled ? ["actions-v1"] : []) + (longActions ? ["actions-long-running-v1"] : []) + (workspace.accessRequestsAvailable ? ["action-access-v1"] : []) + (streamActions ? ["action-stream-v1"] : []))
-            if busEnabled { emit("bus", bus: .init(.register, registration: .init(actions: [MonitorState.readAction, Self.jobReadAction, HandoffActions.list, HandoffActions.prepare, HandoffActions.read] + (longActions ? [HandoffActions.wait] : []), channels: [.init("status", title: "Fuego compute status", kind: .state, schema: MonitorState.schema), .init("job_status", title: "Selected Fuego handoff", kind: .state, schema: Self.jobSchema)]))) }
+            emit("ready", features: ["appearance-v1", "dashboard-v1", "panels-v1"] + (customViews ? ["custom-views-v1"] : []) + (busEnabled ? ["actions-v1"] : []) + (statusAction.executionPolicy != nil ? ["action-policy-v1"] : []) + (longActions ? ["actions-long-running-v1"] : []) + (workspace.accessRequestsAvailable ? ["action-access-v1"] : []) + (streamActions ? ["action-stream-v1"] : []))
+            if busEnabled { emit("bus", bus: .init(.register, registration: .init(actions: [statusAction, Self.jobReadAction, HandoffActions.list, HandoffActions.prepare, HandoffActions.read] + (longActions ? [HandoffActions.wait] : []), channels: [.init("status", title: "Fuego compute status", kind: .state, schema: MonitorState.schema), .init("job_status", title: "Selected Fuego handoff", kind: .state, schema: Self.jobSchema)]))) }
             if busEnabled { emit("bus", bus: .init(.discover)) }
             publish(); refresh(); return
         }
