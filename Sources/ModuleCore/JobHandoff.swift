@@ -145,18 +145,27 @@ public struct HandoffJob: Codable, Equatable, Identifiable, Sendable {
         default: break
         }
     }
-    public mutating func receiveEvents(_ objects: [[String: Any]]) throws {
-        guard objects.count <= 100 else { throw HandoffProblem.invalid }
-        for event in objects {
-            guard let seq = event["seq"] as? Int, seq >= 0 else { continue }
-            if let id = event["runId"] as? String, UUID(uuidString: id) != run { throw HandoffProblem.invalid }
-            guard seq > eventSequence else { continue }
-            eventSequence = seq
-            if event["eventType"] as? String == "fuego.dispatch" { admitted = true }
-            if let message = event["message"] as? String, !message.isEmpty {
-                events.append(Self.bounded(message, bytes: 360)); events = Array(events.suffix(12))
+    /// Unbound legacy rows cannot be admitted or mutate a cursor. Production
+    /// callers use the original body plus its captured target below.
+    public mutating func receiveEvents(_ objects: [[String: Any]]) throws { throw HandoffProblem.unavailable }
+    /// Stage only event presentation/cursor. No row establishes admission or effects.
+    public func stagingEvents(_ data: Data, target: RunEventReadTarget) throws -> Self {
+        guard target.matches(self) else { throw HandoffProblem.invalid }
+        _ = try RunEventReadContract.decodePage(data)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { throw HandoffProblem.invalid }
+        var copy = self, cursor = target.afterSeq
+        for row in rows {
+            guard let company = row["companyId"] as? String, company.utf8.elementsEqual(target.companyID.uuidString.lowercased().utf8),
+                  let agent = row["agentId"] as? String, agent.utf8.elementsEqual(target.agentID.uuidString.lowercased().utf8),
+                  let run = row["runId"] as? String, run.utf8.elementsEqual(target.runID.uuidString.lowercased().utf8),
+                  let number = row["seq"] as? NSNumber, let seq = Int(exactly: number.int64Value), seq > cursor else { throw HandoffProblem.invalid }
+            cursor = seq
+            if let message = row["message"] as? String, !message.isEmpty {
+                copy.events.append(Self.bounded(message, bytes: 360)); copy.events = Array(copy.events.suffix(12))
             }
         }
+        copy.eventSequence = cursor
+        return copy
     }
     public mutating func receiveConversation(_ object: [String: Any], now: Date = Date()) throws {
         guard let conversation = object["conversation"] as? [String: Any],

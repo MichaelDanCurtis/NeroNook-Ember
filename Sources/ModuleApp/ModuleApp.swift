@@ -58,6 +58,10 @@ import NookPluginSDK
                   self.handoff.company == job.target.company else { return nil }
             return self.handoff.conversationReadGeneration
         }
+        connection?.eventOwner = { [weak self, weak connection] target in
+            guard let self, let connection, self.connection === connection else { return false }
+            return self.handoff.eventReadIsCurrent(target)
+        }
         waits.send = { [weak self] request, update in self?.emit("bus", bus: .init(.update, requestID: request, update: update)) }
         handoffObservation = handoff.objectWillChange.sink { [weak self] in Task { @MainActor in self?.objectWillChange.send(); self?.publish() } }
         connection?.onReady = { [weak self] in Task { @MainActor in

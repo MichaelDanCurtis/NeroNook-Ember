@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 public enum FuegoRequest {
-    case companies, agents(UUID), agent(UUID), create(HandoffJob), invoke(HandoffJob), run(UUID), events(UUID, Int), cancel(UUID, UUID), findTask(HandoffJob), findRuns(HandoffJob), conversation(HandoffJob), sendConversation(HandoffJob), cancelConversation(HandoffJob, UUID), cancelRemote(UUID)
+    case companies, agents(UUID), agent(UUID), create(HandoffJob), invoke(HandoffJob), run(UUID), events(RunEventReadTarget), cancel(UUID, UUID), findTask(HandoffJob), findRuns(HandoffJob), conversation(HandoffJob), sendConversation(HandoffJob), cancelConversation(HandoffJob, UUID), cancelRemote(UUID)
     public var method: String {
         switch self { case .create, .invoke, .cancel, .sendConversation, .cancelConversation, .cancelRemote: return "POST"; default: return "GET" }
     }
@@ -14,7 +14,7 @@ public enum FuegoRequest {
         case .create(let job): return "/api/companies/\(job.target.company.uuidString.lowercased())/issues"
         case .invoke(let job): return "/api/agents/\(job.target.id.uuidString.lowercased())/heartbeat/invoke"
         case .run(let id): return "/api/heartbeat-runs/\(id.uuidString.lowercased())"
-        case .events(let id, let seq): return "/api/heartbeat-runs/\(id.uuidString.lowercased())/events?afterSeq=\(max(0, seq))&limit=50"
+        case .events(let target): return target.path
         case .cancel(let id, _): return "/api/heartbeat-runs/\(id.uuidString.lowercased())/cancel"
         case .cancelRemote(let id): return "/api/heartbeat-runs/\(id.uuidString.lowercased())/cancel"
         case .findTask(let job): return "/api/companies/\(job.target.company.uuidString.lowercased())/issues?assigneeAgentId=\(job.target.id.uuidString.lowercased())&q=\(job.id.uuidString.prefix(8))&limit=25"
@@ -42,6 +42,13 @@ public enum FuegoRequest {
 @MainActor public protocol FuegoAPI: AnyObject {
     var server: String { get }
     func request(_ request: FuegoRequest) async throws -> Data
+    func checkEventRead(_ target: RunEventReadTarget) throws
+    func finishEventRead(_ target: RunEventReadTarget)
+}
+public extension FuegoAPI {
+    // Legacy/mock GET implementations do not silently become qualified owners.
+    func checkEventRead(_ target: RunEventReadTarget) throws { throw HandoffProblem.unavailable }
+    func finishEventRead(_ target: RunEventReadTarget) {}
 }
 
 public struct FuegoCompany: Equatable, Identifiable {
@@ -69,13 +76,62 @@ public struct HandoffReview: Equatable {
     @Published public private(set) var busy = false
     @Published public private(set) var storageFailed = false
     @Published public var company: UUID? {
-        didSet { if company != oldValue { retireConversationReads() } }
+        didSet { if company != oldValue { retireConversationReads(); retireEventReads() } }
     }
     @Published public var selectedJob: UUID?
     private var generation = 0
     public private(set) var conversationReadGeneration: UInt64 = 1
     private func retireConversationReads() {
         conversationReadGeneration = conversationReadGeneration > 0 && conversationReadGeneration < 9_007_199_254_740_991 ? conversationReadGeneration + 1 : 0
+    }
+    public private(set) var eventReadGeneration: UInt64 = 1
+    private final class EventTicket {
+        let target: RunEventReadTarget
+        var lastClock: Double
+        init(_ target: RunEventReadTarget) { self.target = target; lastClock = target.started }
+    }
+    private var activeEventRead: EventTicket?
+    private let eventClock: @MainActor () -> Double
+    private var eventSaveCompleted: (() throws -> Void)?
+    private func retireEventReads() {
+        activeEventRead = nil
+        eventReadGeneration = eventReadGeneration > 0 && eventReadGeneration < 9_007_199_254_740_991 ? eventReadGeneration + 1 : 0
+    }
+    public func eventReadIsCurrent(_ target: RunEventReadTarget) -> Bool {
+        guard !storageFailed, company == target.companyID, eventReadGeneration == target.generation,
+              api.server.utf8.elementsEqual(target.server.utf8),
+              let ticket = activeEventRead, ticket.target.sameInvocation(as: target),
+              let job = jobs.first(where: { $0.id == target.jobID }) else { return false }
+        return target.matches(job)
+    }
+    private func checkEventRead(_ ticket: EventTicket, producer: Bool = false) throws {
+        try Task.checkCancellation()
+        guard activeEventRead === ticket, eventReadIsCurrent(ticket.target) else { throw HandoffProblem.unavailable }
+        if producer { try api.checkEventRead(ticket.target) }
+        let now = eventClock()
+        try Task.checkCancellation()
+        guard activeEventRead === ticket, eventReadIsCurrent(ticket.target) else { throw HandoffProblem.unavailable }
+        try ticket.target.checkTime(now, previous: ticket.lastClock); ticket.lastClock = now
+    }
+    private func readEvents(_ id: UUID) async throws {
+        guard !storageFailed, let job = jobs.first(where: { $0.id == id }), company == job.target.company else { throw HandoffProblem.unavailable }
+        let target = try RunEventReadTarget(job: job, generation: eventReadGeneration, now: eventClock())
+        let ticket = EventTicket(target); activeEventRead = ticket
+        defer { api.finishEventRead(target); if activeEventRead === ticket { activeEventRead = nil } }
+        try checkEventRead(ticket)
+        let data = try await api.request(.events(target))
+        try checkEventRead(ticket, producer: true)
+        guard let current = jobs.first(where: { $0.id == id }) else { throw HandoffProblem.invalid }
+        let staged = try current.stagingEvents(data, target: target)
+        try checkEventRead(ticket, producer: true)
+        // Every callback is finished before reading the latest array. Persistence
+        // is synchronous; no post-save timeout can misreport committed cursor data.
+        guard let index = jobs.firstIndex(where: { $0.id == id }), target.matches(jobs[index]) else { throw HandoffProblem.unavailable }
+        var proposed = jobs
+        proposed[index].events = staged.events; proposed[index].eventSequence = staged.eventSequence
+        do { try store.save(proposed); try eventSaveCompleted?() }
+        catch { storageFailed = true; message = HandoffProblem.storage.localizedDescription; throw HandoffProblem.storage }
+        jobs = proposed
     }
     private var reading = false
     // A preflight refusal has no remote job receipt. Keep a bounded, exact-ID
@@ -85,9 +141,17 @@ public struct HandoffReview: Equatable {
         guard let failure = reviewFailures[id], failure.server == server else { return nil }
         return failure.message
     }
-    public init(api: FuegoAPI, store: HandoffStore, route: HandoffRoute = .task) {
-        self.api = api; self.store = store; self.route = route
+    public init(api: FuegoAPI, store: HandoffStore, route: HandoffRoute = .task, eventClock: @escaping @MainActor () -> Double = RunEventReadTarget.monotonicNow) {
+        self.api = api; self.store = store; self.route = route; self.eventClock = eventClock
         do { jobs = try store.load(); selectedJob = jobs.first?.id } catch { storageFailed = true; message = HandoffProblem.storage.localizedDescription }
+    }
+    // Internal fault port runs only AFTER the real save; ModuleApp uses the
+    // public initializer and cannot replace or bypass HandoffStore.save.
+    convenience init(api: FuegoAPI, store: HandoffStore, route: HandoffRoute = .task,
+                     eventClock: @escaping @MainActor () -> Double,
+                     eventSaveCompleted: @escaping () throws -> Void) {
+        self.init(api: api, store: store, route: route, eventClock: eventClock)
+        self.eventSaveCompleted = eventSaveCompleted
     }
     public var activeJob: HandoffJob? { jobs.first { $0.id == selectedJob } ?? jobs.first }
     // A lost create acknowledgement cannot have reached this app's invocation
@@ -95,7 +159,7 @@ public struct HandoffReview: Equatable {
     // An ambiguous invocation can already be executing and still blocks handoff.
     public var canSubmit: Bool { !busy && !storageFailed && !jobs.contains { ($0.route == .conversation || $0.issue != nil) && $0.run == nil && $0.phase == .uncertain } }
     public var hasUnconfirmedSave: Bool { jobs.contains { $0.route != .conversation && $0.issue == nil && $0.phase == .uncertain } }
-    public func invalidate() { generation += 1; retireConversationReads(); review = nil; targets = []; companies = []; message = "Fuego connection changed. Existing tasks will not be resent." }
+    public func invalidate() { generation += 1; retireConversationReads(); retireEventReads(); review = nil; targets = []; companies = []; message = "Fuego connection changed. Existing tasks will not be resent." }
     private func object(_ data: Data) throws -> [String: Any] {
         guard data.count <= 524288, let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HandoffProblem.invalid }; return value
     }
@@ -103,7 +167,7 @@ public struct HandoffReview: Equatable {
         guard data.count <= 524288, let value = try JSONSerialization.jsonObject(with: data) as? [[String: Any]], value.count <= 100 else { throw HandoffProblem.invalid }; return value
     }
     public func refreshTargets() async {
-        guard !busy else { return }
+        guard !busy, !storageFailed else { return }
         generation += 1; let current = generation
         do {
             let values = try array(await api.request(.companies))
@@ -113,17 +177,17 @@ public struct HandoffReview: Equatable {
                 let prefix = value["issuePrefix"] as? String
                 next.append(.init(id: id, name: name, prefix: prefix?.range(of: #"^[A-Z][A-Z0-9]{0,15}$"#, options: .regularExpression) != nil ? prefix : nil))
             }
-            guard current == generation else { return }
+            guard current == generation, !storageFailed else { return }
             companies = next
             if !companies.contains(where: { $0.id == company }) { company = companies.first?.id }
             guard let company, let selected = companies.first(where: { $0.id == company }) else { targets = []; message = "No accessible Fuego organization was found."; return }
             let agents = try array(await api.request(.agents(company)))
             let nextTargets = agents.compactMap { try? HandoffTarget.decode($0, company: company, companyName: selected.name, companyPrefix: selected.prefix) }
-            guard current == generation else { return }
+            guard current == generation, !storageFailed else { return }
             targets = nextTargets
             message = targets.isEmpty ? "No active remote Fuego agent is configured in this organization. Configure its computer and workspace in Fuego." : "Choose an agent, write a task, then review the handoff."
         } catch {
-            guard current == generation else { return }
+            guard current == generation, !storageFailed else { return }
             targets = []; review = nil; message = safe(error)
         }
     }
@@ -218,36 +282,36 @@ public struct HandoffReview: Equatable {
         var copy = jobs[index]; try copy.receiveConversation(object); jobs[index] = copy
     }
     public func poll() async {
-        guard !reading, !busy else { return }; reading = true; defer { reading = false }
+        guard !reading, !busy, !storageFailed else { return }; reading = true; defer { reading = false }
         // With a UI selection, do not spend the four-job budget on another
         // company. Without one, retain original-job reconciliation semantics;
         // the real Session still refuses missing selected-company authority.
-        for job in jobs.filter({ $0.server == api.server && ($0.route != .conversation || company == nil || $0.target.company == company) && ($0.run != nil || $0.route == .conversation) && !$0.phase.settled }).prefix(4) {
+        for job in jobs.filter({ $0.server == api.server && (company == nil || $0.target.company == company) && ($0.run != nil || $0.route == .conversation) && !$0.phase.settled }).prefix(4) {
+            guard !storageFailed else { return }
             do {
                 if job.route == .conversation {
-                    let snapshot = try object(await api.request(.conversation(job)))
+                    let bytes = try await api.request(.conversation(job))
+                    guard !storageFailed else { return }
+                    let snapshot = try object(bytes)
                     try receiveConversation(job.id, snapshot); try persist()
                     // A delayed verified stop/result supersedes the transport
                     // warning for this selected cancellation. Keep unrelated
                     // task or account failures intact.
                     if selectedJob == job.id, let updated = jobs.first(where: { $0.id == job.id }),
                        updated.cancelSent, updated.phase.settled { message = updated.detail }
-                    if let current = jobs.first(where: { $0.id == job.id }), let runID = current.run,
-                       let events = try? array(await api.request(.events(runID, current.eventSequence))), let index = jobs.firstIndex(where: { $0.id == job.id }) {
-                        try jobs[index].receiveEvents(events); try persist()
-                    }
+                    try? await readEvents(job.id)
                     continue
                 }
                 guard let runID = job.run else { continue }
-                let run = try object(await api.request(.run(runID)))
+                let bytes = try await api.request(.run(runID))
+                guard !storageFailed else { return }
+                let run = try object(bytes)
                 try receiveRun(job.id, run)
                 try persist()
                 // A missing event stream cannot hide a confirmed final answer.
-                if let events = try? array(await api.request(.events(runID, job.eventSequence))),
-                   let index = jobs.firstIndex(where: { $0.id == job.id }) {
-                    try jobs[index].receiveEvents(events); try persist()
-                }
+                try? await readEvents(job.id)
             } catch {
+                guard !storageFailed else { return }
                 update(job.id) { $0.detail = "Progress is unavailable. The original run may still be active. Reconnect to inspect it; nothing is resent." }
                 message = safe(error)
             }
@@ -331,6 +395,7 @@ public struct HandoffReview: Equatable {
         return URL(string: job.server + "/" + prefix + "issues/" + issue.uuidString.lowercased())
     }
     private func persist() throws {
+        guard !storageFailed else { throw HandoffProblem.storage }
         do { try store.save(jobs) } catch { storageFailed = true; message = HandoffProblem.storage.localizedDescription; throw HandoffProblem.storage }
     }
     private func safe(_ error: Error) -> String { (error as? HandoffProblem)?.localizedDescription ?? HandoffProblem.unavailable.localizedDescription }

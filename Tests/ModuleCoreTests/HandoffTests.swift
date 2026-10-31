@@ -35,7 +35,13 @@ private func makeRun(_ status: String, result: [String: Any] = [:]) -> [String: 
             value = ["id": issueID.uuidString, "companyId": companyID.uuidString, "assigneeAgentId": agentID.uuidString, "identifier": "TEST-1", "status": "backlog", "description": job.task]
         case .invoke: invokes += 1; if loseInvoke { throw HandoffProblem.unavailable }; value = makeRun(status, result: result)
         case .run: value = makeRun(status, result: result)
-        case .events: if loseEvents { throw HandoffProblem.unavailable }; value = [["seq": 1, "runId": runID.uuidString, "eventType": "fuego.dispatch", "message": "Dispatched to selected computer"]]
+        case .events(let target):
+            if loseEvents { throw HandoffProblem.unavailable }
+            value = [["id": 1, "companyId": target.companyID.uuidString.lowercased(),
+                      "agentId": target.agentID.uuidString.lowercased(), "runId": target.runID.uuidString.lowercased(),
+                      "seq": target.afterSeq + 1, "eventType": "fuego.dispatch", "stream": "system", "level": "info",
+                      "color": NSNull(), "message": "Dispatched to selected computer", "payload": NSNull(),
+                      "createdAt": "2026-10-30T12:00:00Z"]]
         case .cancel: cancels += 1; if loseCancel { throw HandoffProblem.unavailable }; value = makeRun(status, result: result)
         case .findTask:
             if let job = createdJob {
@@ -108,7 +114,7 @@ private func makeRun(_ status: String, result: [String: Any] = [:]) -> [String: 
     func testProgressAndFinalResultUseOriginalRunAfterRestart() async throws {
         let api = FakeAPI(), model = try await prepared(api); await model.approve(model.review!.id)
         let reopened = controller(api); XCTAssertEqual(reopened.jobs.first?.phase, .uncertain)
-        api.status = "running"; await reopened.poll()
+        api.status = "running"; api.result = ["commandId": "authored-command"]; await reopened.poll()
         XCTAssertEqual(reopened.jobs.first?.phase, .running); XCTAssertTrue(reopened.jobs.first?.admitted == true)
         api.status = "succeeded"; api.result = ["state": "completed", "commandId": "command", "finalResponse": "Nook handoff check."]
         await reopened.poll(); XCTAssertEqual(reopened.jobs.first?.phase, .succeeded); XCTAssertEqual(reopened.jobs.first?.result, "Nook handoff check.")
