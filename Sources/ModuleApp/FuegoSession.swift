@@ -21,6 +21,9 @@ import NookPluginSDK
     private var closed = false
     private let conversationReads = EmberConversationReadOwner()
     var conversationOwner: ((HandoffJob) -> UInt64?)?
+    private let eventReads = RunEventReadProducerOwner()
+    private var eventTicket: RunEventReadProducerOwner.Ticket?
+    var eventOwner: ((RunEventReadTarget) -> Bool)?
     init(server: String?) {
         let selection = EmberConversationReadOrigin(saved: server)
         conversationOrigin = selection
@@ -46,7 +49,7 @@ import NookPluginSDK
                     Spacer()
                     Button("Use this sign-in") {
                         guard !self.closed, self.loaded, !self.diagnosticNavigating, self.endpoint.contains(self.webView.url) else { return }
-                        self.conversationReads.retire()
+                        self.conversationReads.retire(); self.retireEventReads()
                         self.conversationOrigin.selectDisplayed()
                         UserDefaults.standard.set(self.server, forKey: "fuegoServer")
                         self.onReady?(); self.windows.close("sign-in")
@@ -61,22 +64,22 @@ import NookPluginSDK
         started = true; webView.load(URLRequest(url: URL(string: server)!))
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        conversationReads.retire()
+        conversationReads.retire(); retireEventReads()
         diagnosticPage = UUID(); diagnosticNavigating = false
         loaded = endpoint.contains(webView.url)
         if loaded { onReady?() }
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        conversationReads.retire()
+        conversationReads.retire(); retireEventReads()
         diagnosticPage = UUID(); diagnosticNavigating = true
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(action.targetFrame != nil && endpoint.contains(action.request.url) ? .allow : .cancel)
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
-    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { conversationReads.retire() }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); retireEventReads(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); retireEventReads(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { conversationReads.retire(); retireEventReads(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { conversationReads.retire(); retireEventReads() }
     /// Explicit diagnostic only; does not load/restore a page or create a profile.
     /// The existing session performs GETs and projects bodies before returning.
     func connectionDiagnostic(company: UUID?) async -> FuegoConnectionDiagnostic {
@@ -90,6 +93,7 @@ import NookPluginSDK
     func request(_ request: FuegoRequest) async throws -> Data {
         guard loaded, endpoint.contains(webView.url) else { throw HandoffProblem.signIn }
         if case .conversation(let job) = request { return try await readConversation(job) }
+        if case .events(let target) = request { return try await readEvents(target) }
         if request.method == "POST" { return try await nativeWrite(request) }
         let arguments: [String: Any] = ["path": request.path, "method": request.method,
                                        "body": request.body.map { String(data: try! JSONSerialization.data(withJSONObject: $0), encoding: .utf8)! } ?? "",
@@ -150,6 +154,43 @@ import NookPluginSDK
         try conversationReads.check(ticket, qualified: conversationOriginQualified, selection: conversationOwner?(job), now: now(), cancelled: Task.isCancelled)
         return data
     }
+    private func retireEventReads() { eventReads.retire(); eventTicket = nil }
+    private func readEvents(_ target: RunEventReadTarget) async throws -> Data {
+        let current: () -> Bool = { [weak self] in
+            guard let self, target.server.utf8.elementsEqual(self.server.utf8) else { return false }
+            let owned = self.eventOwner?(target) == true
+            return owned && !self.closed && self.conversationOrigin.qualified && self.loaded
+                && !self.diagnosticNavigating && self.endpoint.contains(self.webView.url)
+        }
+        let ticket = try eventReads.begin(target, current: current, clock: RunEventReadTarget.monotonicNow)
+        eventTicket = ticket
+        do {
+            let remaining = try eventReads.remaining(ticket, current: current, clock: RunEventReadTarget.monotonicNow)
+            let raw = try await webView.callAsyncJavaScript(RunEventReadScript.source,
+                arguments: ["origin": server, "run": target.runID.uuidString.lowercased(), "afterSeq": target.afterSeq, "remainingMs": remaining],
+                in: nil, contentWorld: .defaultClient)
+            return try eventReads.accept(raw, ticket: ticket, current: current, clock: RunEventReadTarget.monotonicNow)
+        } catch {
+            eventReads.finish(ticket)
+            if eventTicket === ticket { eventTicket = nil }
+            if Task.isCancelled { throw CancellationError() }
+            if error is RunEventReadContract.Failure || error is HandoffProblem { throw error }
+            throw HandoffProblem.unavailable
+        }
+    }
+    func checkEventRead(_ target: RunEventReadTarget) throws {
+        guard let ticket = eventTicket, ticket.target.sameInvocation(as: target) else { throw HandoffProblem.unavailable }
+        try eventReads.check(ticket, current: { [weak self] in
+            guard let self else { return false }
+            let owned = self.eventOwner?(target) == true
+            return owned && !self.closed && self.conversationOrigin.qualified && self.loaded
+                && !self.diagnosticNavigating && self.endpoint.contains(self.webView.url)
+        }, clock: RunEventReadTarget.monotonicNow)
+    }
+    func finishEventRead(_ target: RunEventReadTarget) {
+        guard let ticket = eventTicket, ticket.target.sameInvocation(as: target) else { return }
+        eventReads.finish(ticket); eventTicket = nil
+    }
     private func nativeWrite(_ value: FuegoRequest) async throws -> Data {
         let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
         let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in cookieStore.getAllCookies { continuation.resume(returning: $0) } }
@@ -197,7 +238,7 @@ import NookPluginSDK
         }
     }
     func close() {
-        closed = true; conversationReads.close()
+        closed = true; conversationReads.close(); eventReads.close(); eventTicket = nil
         webView.configuration.websiteDataStore.httpCookieStore.remove(self)
         diagnosticPage = UUID(); diagnosticNavigating = true; windows.closeAll(); webView.stopLoading()
     }

@@ -230,7 +230,7 @@ private func snapshot(_ job: HandoffJob?, status: String = "pending", run: Bool 
         XCTAssertEqual(model.jobs[0].phase, .queued); XCTAssertNil(model.jobs[0].run)
         api.withRun = true; api.status = "running"; await model.poll()
         XCTAssertEqual(model.jobs[0].run, runID); XCTAssertEqual(model.jobs[0].phase, .running)
-        XCTAssertTrue(model.jobs[0].admitted); XCTAssertEqual(api.sends, 1)
+        XCTAssertFalse(model.jobs[0].admitted, "Resolving the original conversation run does not establish computer admission."); XCTAssertEqual(api.sends, 1)
     }
     func testLostSendRecoveryAndRestartNeverResend() async throws {
         let api = ConversationAPI(), model = try await prepared(api); api.lostSend = true
