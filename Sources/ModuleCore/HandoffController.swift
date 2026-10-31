@@ -68,9 +68,15 @@ public struct HandoffReview: Equatable {
     @Published public private(set) var message = "Connect your Fuego account to hand off a task."
     @Published public private(set) var busy = false
     @Published public private(set) var storageFailed = false
-    @Published public var company: UUID?
+    @Published public var company: UUID? {
+        didSet { if company != oldValue { retireConversationReads() } }
+    }
     @Published public var selectedJob: UUID?
     private var generation = 0
+    public private(set) var conversationReadGeneration: UInt64 = 1
+    private func retireConversationReads() {
+        conversationReadGeneration = conversationReadGeneration > 0 && conversationReadGeneration < 9_007_199_254_740_991 ? conversationReadGeneration + 1 : 0
+    }
     private var reading = false
     // A preflight refusal has no remote job receipt. Keep a bounded, exact-ID
     // outcome so workflow observers cannot mistake it for the user pressing Back.
@@ -89,7 +95,7 @@ public struct HandoffReview: Equatable {
     // An ambiguous invocation can already be executing and still blocks handoff.
     public var canSubmit: Bool { !busy && !storageFailed && !jobs.contains { ($0.route == .conversation || $0.issue != nil) && $0.run == nil && $0.phase == .uncertain } }
     public var hasUnconfirmedSave: Bool { jobs.contains { $0.route != .conversation && $0.issue == nil && $0.phase == .uncertain } }
-    public func invalidate() { generation += 1; review = nil; targets = []; companies = []; message = "Fuego connection changed. Existing tasks will not be resent." }
+    public func invalidate() { generation += 1; retireConversationReads(); review = nil; targets = []; companies = []; message = "Fuego connection changed. Existing tasks will not be resent." }
     private func object(_ data: Data) throws -> [String: Any] {
         guard data.count <= 524288, let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HandoffProblem.invalid }; return value
     }
@@ -213,7 +219,10 @@ public struct HandoffReview: Equatable {
     }
     public func poll() async {
         guard !reading, !busy else { return }; reading = true; defer { reading = false }
-        for job in jobs.filter({ $0.server == api.server && ($0.run != nil || $0.route == .conversation) && !$0.phase.settled }).prefix(4) {
+        // With a UI selection, do not spend the four-job budget on another
+        // company. Without one, retain original-job reconciliation semantics;
+        // the real Session still refuses missing selected-company authority.
+        for job in jobs.filter({ $0.server == api.server && ($0.route != .conversation || company == nil || $0.target.company == company) && ($0.run != nil || $0.route == .conversation) && !$0.phase.settled }).prefix(4) {
             do {
                 if job.route == .conversation {
                     let snapshot = try object(await api.request(.conversation(job)))

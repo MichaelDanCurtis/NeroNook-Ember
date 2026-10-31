@@ -6,7 +6,7 @@ import NookPluginSDK
 
 /// This plugin's own ordinary human web session. No Fuego Desktop, browser,
 /// provider or Compute credentials are read, exported or imported.
-@MainActor final class FuegoSession: NSObject, FuegoAPI, WKNavigationDelegate {
+@MainActor final class FuegoSession: NSObject, FuegoAPI, WKNavigationDelegate, WKHTTPCookieStoreObserver {
     private(set) var endpoint: FuegoServer
     var server: String { endpoint.origin }
     private(set) var webView: WKWebView
@@ -17,8 +17,14 @@ import NookPluginSDK
     private var started = false
     private var diagnosticPage = UUID()
     private var diagnosticNavigating = false
-    init(server: String) {
-        endpoint = (try? FuegoServer(server)) ?? (try! FuegoServer("https://fuego-bridge.curtishome.org"))
+    private var conversationOrigin: EmberConversationReadOrigin
+    private var closed = false
+    private let conversationReads = EmberConversationReadOwner()
+    var conversationOwner: ((HandoffJob) -> UInt64?)?
+    init(server: String?) {
+        let selection = EmberConversationReadOrigin(saved: server)
+        conversationOrigin = selection
+        endpoint = selection.endpoint
         let key = "fuegoWebProfile." + endpoint.origin
         let profile = UserDefaults.standard.string(forKey: key).flatMap(UUID.init(uuidString:)) ?? UUID()
         UserDefaults.standard.set(profile.uuidString, forKey: key)
@@ -28,6 +34,8 @@ import NookPluginSDK
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
+        // Observe before any page load/read. Notifications carry no credentials.
+        webView.configuration.websiteDataStore.httpCookieStore.add(self)
     }
     func connect() {
         if !started { started = true; webView.load(URLRequest(url: URL(string: server)!)) }
@@ -36,7 +44,13 @@ import NookPluginSDK
                 HStack {
                     VStack(alignment: .leading) { Text("Sign in to Fuego").font(.headline); Text("This sign-in belongs only to the Fuego Nook plugin.").font(.caption).pluginSecondaryText() }
                     Spacer()
-                    Button("Use this sign-in") { self.onReady?(); self.windows.close("sign-in") }
+                    Button("Use this sign-in") {
+                        guard !self.closed, self.loaded, !self.diagnosticNavigating, self.endpoint.contains(self.webView.url) else { return }
+                        self.conversationReads.retire()
+                        self.conversationOrigin.selectDisplayed()
+                        UserDefaults.standard.set(self.server, forKey: "fuegoServer")
+                        self.onReady?(); self.windows.close("sign-in")
+                    }
                 }.padding(16)
                 FuegoSignInWebView(webView: self.webView)
             }
@@ -47,18 +61,22 @@ import NookPluginSDK
         started = true; webView.load(URLRequest(url: URL(string: server)!))
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        conversationReads.retire()
         diagnosticPage = UUID(); diagnosticNavigating = false
         loaded = endpoint.contains(webView.url)
         if loaded { onReady?() }
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        conversationReads.retire()
         diagnosticPage = UUID(); diagnosticNavigating = true
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(action.targetFrame != nil && endpoint.contains(action.request.url) ? .allow : .cancel)
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { conversationReads.retire(); diagnosticPage = UUID(); diagnosticNavigating = false; loaded = false; onChange?() }
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) { conversationReads.retire() }
     /// Explicit diagnostic only; does not load/restore a page or create a profile.
     /// The existing session performs GETs and projects bodies before returning.
     func connectionDiagnostic(company: UUID?) async -> FuegoConnectionDiagnostic {
@@ -71,6 +89,7 @@ import NookPluginSDK
     }
     func request(_ request: FuegoRequest) async throws -> Data {
         guard loaded, endpoint.contains(webView.url) else { throw HandoffProblem.signIn }
+        if case .conversation(let job) = request { return try await readConversation(job) }
         if request.method == "POST" { return try await nativeWrite(request) }
         let arguments: [String: Any] = ["path": request.path, "method": request.method,
                                        "body": request.body.map { String(data: try! JSONSerialization.data(withJSONObject: $0), encoding: .utf8)! } ?? "",
@@ -105,6 +124,30 @@ import NookPluginSDK
             throw HandoffProblem.forbidden
         }
         guard (200..<300).contains(status), let body = response["body"] as? String, let data = body.data(using: .utf8), data.count <= 524288 else { throw HandoffProblem.unavailable }
+        return data
+    }
+    private var conversationOriginQualified: Bool {
+        !closed && conversationOrigin.qualified && loaded && !diagnosticNavigating && endpoint.contains(webView.url)
+    }
+    private func readConversation(_ job: HandoffJob) async throws -> Data {
+        guard job.server.utf8.elementsEqual(server.utf8) else { throw HandoffProblem.unavailable }
+        func now() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
+        try Task.checkCancellation()
+        let ticket = try conversationReads.begin(qualified: conversationOriginQualified, selection: conversationOwner?(job), now: now())
+        defer { conversationReads.finish(ticket) }
+        let raw: Any?
+        do {
+            raw = try await webView.callAsyncJavaScript(EmberConversationReadScript.source,
+                arguments: ["origin": server, "company": job.target.company.uuidString.lowercased(), "agent": job.target.id.uuidString.lowercased()],
+                in: nil, contentWorld: .defaultClient)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw HandoffProblem.unavailable
+        }
+        let data = try conversationReads.accept(raw, ticket: ticket, origin: server, company: job.target.company, agent: job.target.id,
+            qualified: conversationOriginQualified, selection: conversationOwner?(job), now: now(), cancelled: Task.isCancelled)
+        // Decode and final owner callback use the original total admission budget.
+        try conversationReads.check(ticket, qualified: conversationOriginQualified, selection: conversationOwner?(job), now: now(), cancelled: Task.isCancelled)
         return data
     }
     private func nativeWrite(_ value: FuegoRequest) async throws -> Data {
@@ -153,7 +196,11 @@ import NookPluginSDK
             try? data.write(to: url, options: .atomic); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
     }
-    func close() { diagnosticPage = UUID(); diagnosticNavigating = true; windows.closeAll(); webView.stopLoading() }
+    func close() {
+        closed = true; conversationReads.close()
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+        diagnosticPage = UUID(); diagnosticNavigating = true; windows.closeAll(); webView.stopLoading()
+    }
 }
 private struct FuegoSignInWebView: NSViewRepresentable {
     let webView: WKWebView

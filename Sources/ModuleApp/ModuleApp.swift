@@ -49,10 +49,15 @@ import NookPluginSDK
     private var seenExecutions = Set<UUID>()
     init() {
         let protocolTest = CommandLine.arguments.contains("--protocol-test")
-        let connection = protocolTest ? nil : FuegoSession(server: UserDefaults.standard.string(forKey: "fuegoServer") ?? "https://fuego-bridge.curtishome.org")
+        let connection = protocolTest ? nil : FuegoSession(server: UserDefaults.standard.string(forKey: "fuegoServer"))
         self.connection = connection
         let storage = protocolTest ? FileManager.default.temporaryDirectory.appendingPathComponent("fuego-protocol-\(UUID().uuidString).json") : (try? PluginStorage.directory(id: Self.pluginID).appendingPathComponent("handoffs-v1.json")) ?? URL(fileURLWithPath: "/dev/null")
         handoff = HandoffController(api: connection ?? OfflineFuegoAPI(), store: HandoffStore(url: storage), route: .conversation)
+        connection?.conversationOwner = { [weak self, weak connection] job in
+            guard let self, let connection, self.connection === connection,
+                  self.handoff.company == job.target.company else { return nil }
+            return self.handoff.conversationReadGeneration
+        }
         waits.send = { [weak self] request, update in self?.emit("bus", bus: .init(.update, requestID: request, update: update)) }
         handoffObservation = handoff.objectWillChange.sink { [weak self] in Task { @MainActor in self?.objectWillChange.send(); self?.publish() } }
         connection?.onReady = { [weak self] in Task { @MainActor in
